@@ -5,7 +5,6 @@ import fs from "fs";
 import { dbPath } from "./config";
 
 const dataDir = path.dirname(dbPath);
-console.log("🚀 ~ dbPath:", dbPath);
 
 // data 디렉토리가 없으면 생성
 if (!fs.existsSync(dataDir)) {
