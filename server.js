@@ -13,8 +13,8 @@ const {
 } = require("./lib/db");
 
 const dev = process.env.NODE_ENV !== "production";
-const hostname = "localhost";
-const port = 3000;
+const hostname = dev ? "localhost" : "temporary-chat.kro.kr";
+const port = dev ? 3000 : 443;
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
@@ -162,23 +162,23 @@ app.prepare().then(() => {
     socket.on("disconnect", async () => {
       console.log("Client disconnected:", socket.id);
 
-        // 소켓이 참여한 모든 방에서 나가기 처리
-        const userRooms = socketRooms.get(socket.id);
-        const userId = socket.data.userId;
-        if (userRooms && userId) {
-          for (const roomId of userRooms) {
-            // await removeParticipant(roomId, userId);
-            const room = await getRoom(roomId);
-            if (room) {
-              io.to(roomId).emit("room-update", {
-                roomId,
-                participantCount: room.participantCount,
-              });
-            }
+      // 소켓이 참여한 모든 방에서 나가기 처리
+      const userRooms = socketRooms.get(socket.id);
+      const userId = socket.data.userId;
+      if (userRooms && userId) {
+        for (const roomId of userRooms) {
+          // await removeParticipant(roomId, userId);
+          const room = await getRoom(roomId);
+          if (room) {
+            io.to(roomId).emit("room-update", {
+              roomId,
+              participantCount: room.participantCount,
+            });
           }
-          socketRooms.delete(socket.id);
-          socketNicknames.delete(socket.id);
         }
+        socketRooms.delete(socket.id);
+        socketNicknames.delete(socket.id);
+      }
     });
   });
 
