@@ -2,7 +2,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
-const isVercel = process.env.VERCEL === "1";
+const isVercel = process.env.NODE_ENV === "production";
 const basePath = isVercel 
   ? "/tmp" 
   : process.cwd();

@@ -9,6 +9,8 @@
     "lint": "eslint",
     "db:init": "node scripts/init-db.js",
     "db:reset": "node scripts/reset-db.js",
+    "db:init:prod": "cross-env NODE_ENV=production node scripts/init-db.js",
+    "db:reset:prod": "cross-env NODE_ENV=production node scripts/reset-db.js",
     "db:migrate": "node scripts/migrate-db.js",
     "db:migrate-participants": "node scripts/migrate-to-participants.js"
   },
@@ -22,6 +24,7 @@
     "better-sqlite3": "^12.4.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "cross-env": "^10.1.0",
     "js-cookie": "^3.0.5",
     "lucide-react": "^0.553.0",
     "next": "16.0.1",
