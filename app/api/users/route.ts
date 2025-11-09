@@ -46,6 +46,7 @@ export async function POST(request: NextRequest) {
     return response;
   } catch (error) {
     console.log("🚀 ~ POST ~ error:", error);
+    console.log(process.env.NODE_ENV);
     return NextResponse.json(
       { error: "Failed to create user" },
       { status: 500 }
