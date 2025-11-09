@@ -13,8 +13,8 @@ const {
 } = require("./lib/db");
 
 const dev = process.env.NODE_ENV !== "production";
-const hostname = dev ? "localhost" : "temporary-chat.kro.kr";
-const port = dev ? 3000 : 443;
+const hostname = process.env.HOSTNAME || "localhost";
+const port = parseInt(process.env.PORT || "3000", 10);
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
@@ -36,7 +36,10 @@ app.prepare().then(() => {
     cors: {
       origin: "*",
       methods: ["GET", "POST"],
+      credentials: true,
     },
+    transports: ["websocket", "polling"], // polling fallback 추가
+    allowEIO3: true,
   });
 
   // DB 초기화
@@ -73,10 +76,10 @@ app.prepare().then(() => {
 
       // 이미 참여한 방이면 카운트 증가 안 함
       if (isNewJoin) {
-        socket.join(roomId);
+      socket.join(roomId);
         userRooms.add(roomId);
         console.log(`${user.nickname} joined room ${roomId}`);
-
+      
         // Participant 테이블에 추가
         await addParticipant(roomId, userId);
 
@@ -85,7 +88,7 @@ app.prepare().then(() => {
       }
 
       const room = await getRoom(roomId);
-
+      
       // 룸 업데이트 이벤트 전송
       if (room) {
         io.to(roomId).emit("room-update", {
@@ -101,16 +104,16 @@ app.prepare().then(() => {
 
       // 참여한 방이면 카운트 감소
       if (userRooms.has(roomId) && userId) {
-        socket.leave(roomId);
+      socket.leave(roomId);
         userRooms.delete(roomId);
-        console.log(`Client left room ${roomId}`);
-
+      console.log(`Client left room ${roomId}`);
+      
         // Participant 테이블에서 제거
         // await removeParticipant(roomId, userId);
-        const room = await getRoom(roomId);
-
-        // 룸 업데이트 이벤트 전송
-        if (room) {
+      const room = await getRoom(roomId);
+      
+      // 룸 업데이트 이벤트 전송
+      if (room) {
           io.to(roomId).emit("room-update", {
             roomId,
             participantCount: room.participantCount,
@@ -154,7 +157,7 @@ app.prepare().then(() => {
           await markMessagesAsRead(roomId, userNickname);
         }
       }
-
+      
       // 룸의 모든 클라이언트에게 메시지 전송
       io.to(roomId).emit("receive-message", chatMessage);
     });
