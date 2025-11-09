@@ -1,94 +1,29 @@
-import Database from "better-sqlite3";
-import path from "path";
 import { Room, ChatMessage, User } from "@/types";
-import fs from "fs";
-import { dbPath } from "./config";
+import { supabase } from "./supabase";
 
-const dataDir = path.dirname(dbPath);
-
-// data 디렉토리가 없으면 생성
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
-}
-
-// SQLite 데이터베이스 연결
-const db = new Database(dbPath);
-
-// 초기화 함수
+// 초기화 함수 (Supabase는 테이블을 수동으로 생성해야 함)
 export async function initializeDB(): Promise<void> {
-  // Users 테이블 생성
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      nickname TEXT NOT NULL,
-      createdAt INTEGER NOT NULL,
-      updatedAt INTEGER NOT NULL
-    )
-  `);
-
-  // Rooms 테이블 생성
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS rooms (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      password TEXT,
-      ownerId TEXT NOT NULL,
-      createdAt INTEGER NOT NULL,
-      updatedAt INTEGER NOT NULL,
-      deletedAt INTEGER,
-      FOREIGN KEY (ownerId) REFERENCES users(id)
-    )
-  `);
-
-  // Participants 테이블 생성
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS participants (
-      id TEXT PRIMARY KEY,
-      roomId TEXT NOT NULL,
-      userId TEXT NOT NULL,
-      joinedAt INTEGER NOT NULL,
-      FOREIGN KEY (roomId) REFERENCES rooms(id) ON DELETE CASCADE,
-      FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE,
-      UNIQUE(roomId, userId)
-    )
-  `);
-
-  // Messages 테이블 생성
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS messages (
-      id TEXT PRIMARY KEY,
-      roomId TEXT NOT NULL,
-      nickname TEXT NOT NULL,
-      message TEXT NOT NULL,
-      timestamp INTEGER NOT NULL,
-      isRead INTEGER DEFAULT 0,
-      FOREIGN KEY (roomId) REFERENCES rooms(id) ON DELETE CASCADE
-    )
-  `);
-
-  // 인덱스 생성 (성능 향상)
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_messages_roomId ON messages(roomId);
-    CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
-    CREATE INDEX IF NOT EXISTS idx_messages_isRead ON messages(isRead);
-    CREATE INDEX IF NOT EXISTS idx_participants_roomId ON participants(roomId);
-    CREATE INDEX IF NOT EXISTS idx_participants_userId ON participants(userId);
-  `);
+  // Supabase에서는 SQL Editor에서 테이블을 생성해야 함
+  // 이 함수는 호환성을 위해 유지
+  console.log("Supabase database initialized");
 }
 
 // User 관련 함수
 export async function getUser(userId: string): Promise<User | null> {
   try {
-    const stmt = db.prepare("SELECT * FROM users WHERE id = ?");
-    const row = stmt.get(userId) as any;
+    const { data, error } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", userId)
+      .single();
 
-    if (!row) return null;
+    if (error || !data) return null;
 
     return {
-      id: row.id,
-      nickname: row.nickname,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
+      id: data.id,
+      nickname: data.nickname,
+      createdAt: data.createdAt,
+      updatedAt: data.updatedAt,
     };
   } catch (error) {
     console.error("Error getting user:", error);
@@ -101,19 +36,25 @@ export async function createUser(
   nickname: string
 ): Promise<User> {
   try {
-    const stmt = db.prepare(`
-      INSERT INTO users (id, nickname, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?)
-    `);
-
     const now = Date.now();
-    stmt.run(userId, nickname, now, now);
+    const { data, error } = await supabase
+      .from("users")
+      .insert({
+        id: userId,
+        nickname,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
 
     return {
-      id: userId,
-      nickname,
-      createdAt: now,
-      updatedAt: now,
+      id: data.id,
+      nickname: data.nickname,
+      createdAt: data.createdAt,
+      updatedAt: data.updatedAt,
     };
   } catch (error) {
     console.error("Error creating user:", error);
@@ -126,17 +67,24 @@ export async function updateUser(
   nickname: string
 ): Promise<User | null> {
   try {
-    const stmt = db.prepare(`
-      UPDATE users 
-      SET nickname = ?, updatedAt = ?
-      WHERE id = ?
-    `);
+    const { data, error } = await supabase
+      .from("users")
+      .update({
+        nickname,
+        updatedAt: Date.now(),
+      })
+      .eq("id", userId)
+      .select()
+      .single();
 
-    const result = stmt.run(nickname, Date.now(), userId);
+    if (error || !data) return null;
 
-    if (result.changes === 0) return null;
-
-    return await getUser(userId);
+    return {
+      id: data.id,
+      nickname: data.nickname,
+      createdAt: data.createdAt,
+      updatedAt: data.updatedAt,
+    };
   } catch (error) {
     console.error("Error updating user:", error);
     return null;
@@ -146,26 +94,29 @@ export async function updateUser(
 // Room 관련 함수
 export async function getAllRooms(): Promise<Room[]> {
   try {
-    const stmt = db.prepare(`
-      SELECT 
-        r.*,
-        COUNT(p.id) as participantCount
-      FROM rooms r
-      LEFT JOIN participants p ON r.id = p.roomId
-      WHERE r.deletedAt IS NULL
-      GROUP BY r.id
-      ORDER BY r.createdAt DESC
-    `);
-    const rows = stmt.all() as any[];
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      password: row.password || undefined,
-      ownerId: row.ownerId,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-      participantCount: row.participantCount || 0,
-      deletedAt: row.deletedAt || undefined,
+    const { data: rooms, error } = await supabase
+      .from("rooms")
+      .select(`
+        *,
+        participants(count)
+      `)
+      .is("deletedAt", null)
+      .order("createdAt", { ascending: false });
+
+    if (error) {
+      console.error("Error getting all rooms:", error);
+      return [];
+    }
+
+    return rooms.map((room: any) => ({
+      id: room.id,
+      name: room.name,
+      password: room.password || undefined,
+      ownerId: room.ownerId,
+      createdAt: room.createdAt,
+      updatedAt: room.updatedAt,
+      participantCount: room.participants?.[0]?.count || 0,
+      deletedAt: room.deletedAt || undefined,
     }));
   } catch (error) {
     console.error("Error getting all rooms:", error);
@@ -175,28 +126,33 @@ export async function getAllRooms(): Promise<Room[]> {
 
 export async function getRoom(roomId: string): Promise<Room | null> {
   try {
-    const stmt = db.prepare(`
-      SELECT 
-        r.*,
-        COUNT(p.id) as participantCount
-      FROM rooms r
-      LEFT JOIN participants p ON r.id = p.roomId
-      WHERE r.id = ? AND r.deletedAt IS NULL
-      GROUP BY r.id
-    `);
-    const row = stmt.get(roomId) as any;
+    const { data: room, error } = await supabase
+      .from("rooms")
+      .select(`
+        *,
+        participants(count)
+      `)
+      .eq("id", roomId)
+      .is("deletedAt", null)
+      .single();
 
-    if (!row) return null;
+    if (error || !room) return null;
+
+    // participantCount 계산
+    const { count } = await supabase
+      .from("participants")
+      .select("*", { count: "exact", head: true })
+      .eq("roomId", roomId);
 
     return {
-      id: row.id,
-      name: row.name,
-      password: row.password || undefined,
-      ownerId: row.ownerId,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-      participantCount: row.participantCount || 0,
-      deletedAt: row.deletedAt || undefined,
+      id: room.id,
+      name: room.name,
+      password: room.password || undefined,
+      ownerId: room.ownerId,
+      createdAt: room.createdAt,
+      updatedAt: room.updatedAt,
+      participantCount: count || 0,
+      deletedAt: room.deletedAt || undefined,
     };
   } catch (error) {
     console.error("Error getting room:", error);
@@ -206,19 +162,20 @@ export async function getRoom(roomId: string): Promise<Room | null> {
 
 export async function createRoom(room: Room): Promise<Room> {
   try {
-    const stmt = db.prepare(`
-      INSERT INTO rooms (id, name, password, ownerId, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
+    const { data, error } = await supabase
+      .from("rooms")
+      .insert({
+        id: room.id,
+        name: room.name,
+        password: room.password || null,
+        ownerId: room.ownerId,
+        createdAt: room.createdAt,
+        updatedAt: room.updatedAt,
+      })
+      .select()
+      .single();
 
-    stmt.run(
-      room.id,
-      room.name,
-      room.password || null,
-      room.ownerId,
-      room.createdAt,
-      room.updatedAt
-    );
+    if (error) throw error;
 
     // participantCount는 계산된 값이므로 반환 시 계산
     const createdRoom = await getRoom(room.id);
@@ -243,18 +200,16 @@ export async function updateRoom(
       updatedAt: Date.now(),
     };
 
-    const stmt = db.prepare(`
-      UPDATE rooms 
-      SET name = ?, password = ?, updatedAt = ?
-      WHERE id = ?
-    `);
+    const { error } = await supabase
+      .from("rooms")
+      .update({
+        name: updatedRoom.name,
+        password: updatedRoom.password || null,
+        updatedAt: updatedRoom.updatedAt,
+      })
+      .eq("id", roomId);
 
-    stmt.run(
-      updatedRoom.name,
-      updatedRoom.password || null,
-      updatedRoom.updatedAt,
-      roomId
-    );
+    if (error) throw error;
 
     // participantCount는 계산된 값이므로 다시 조회
     return await getRoom(roomId);
@@ -267,10 +222,12 @@ export async function updateRoom(
 export async function deleteRoom(roomId: string): Promise<boolean> {
   try {
     // 소프트 삭제 (deletedAt 설정)
-    const stmt = db.prepare("UPDATE rooms SET deletedAt = ? WHERE id = ?");
-    const result = stmt.run(Date.now(), roomId);
+    const { error } = await supabase
+      .from("rooms")
+      .update({ deletedAt: Date.now() })
+      .eq("id", roomId);
 
-    return result.changes > 0;
+    return !error;
   } catch (error) {
     console.error("Error deleting room:", error);
     return false;
@@ -284,24 +241,29 @@ export async function addParticipant(
 ): Promise<boolean> {
   try {
     // 이미 참여한 경우 중복 방지
-    const existing = db
-      .prepare("SELECT id FROM participants WHERE roomId = ? AND userId = ?")
-      .get(roomId, userId);
+    const { data: existing } = await supabase
+      .from("participants")
+      .select("id")
+      .eq("roomId", roomId)
+      .eq("userId", userId)
+      .single();
+
     if (existing) {
       return false; // 이미 참여 중
     }
 
-    const stmt = db.prepare(`
-      INSERT INTO participants (id, roomId, userId, joinedAt)
-      VALUES (?, ?, ?, ?)
-    `);
-
     const participantId = `${Date.now()}-${Math.random()
       .toString(36)
       .substr(2, 9)}`;
-    stmt.run(participantId, roomId, userId, Date.now());
 
-    return true;
+    const { error } = await supabase.from("participants").insert({
+      id: participantId,
+      roomId,
+      userId,
+      joinedAt: Date.now(),
+    });
+
+    return !error;
   } catch (error) {
     console.error("Error adding participant:", error);
     return false;
@@ -313,12 +275,13 @@ export async function removeParticipant(
   userId: string
 ): Promise<boolean> {
   try {
-    const stmt = db.prepare(
-      "DELETE FROM participants WHERE roomId = ? AND userId = ?"
-    );
-    const result = stmt.run(roomId, userId);
+    const { error } = await supabase
+      .from("participants")
+      .delete()
+      .eq("roomId", roomId)
+      .eq("userId", userId);
 
-    return result.changes > 0;
+    return !error;
   } catch (error) {
     console.error("Error removing participant:", error);
     return false;
@@ -327,14 +290,19 @@ export async function removeParticipant(
 
 export async function getParticipants(roomId: string): Promise<string[]> {
   try {
-    const stmt = db.prepare(`
-      SELECT u.nickname 
-      FROM participants p
-      JOIN users u ON p.userId = u.id
-      WHERE p.roomId = ?
-    `);
-    const rows = stmt.all(roomId) as any[];
-    return rows.map((row) => row.nickname);
+    const { data, error } = await supabase
+      .from("participants")
+      .select(`
+        userId,
+        users(nickname)
+      `)
+      .eq("roomId", roomId);
+
+    if (error || !data) return [];
+
+    return data
+      .map((p: any) => p.users?.nickname)
+      .filter((nickname: string) => nickname);
   } catch (error) {
     console.error("Error getting participants:", error);
     return [];
@@ -343,28 +311,22 @@ export async function getParticipants(roomId: string): Promise<string[]> {
 
 // Chat 관련 함수
 export async function getChatMessages(roomId: string): Promise<ChatMessage[]> {
-  const updateStmt = db.prepare(`
-    UPDATE messages 
-    SET isRead = 1 
-    WHERE roomId = ? AND isRead = 0
-  `);
-  updateStmt.run(roomId);
-
   try {
-    const stmt = db.prepare(`
-      SELECT * FROM messages 
-      WHERE roomId = ? 
-      ORDER BY timestamp ASC
-    `);
-    const rows = stmt.all(roomId) as any[];
+    const { data, error } = await supabase
+      .from("messages")
+      .select("*")
+      .eq("roomId", roomId)
+      .order("timestamp", { ascending: true });
 
-    return rows.map((row) => ({
+    if (error || !data) return [];
+
+    return data.map((row: any) => ({
       id: row.id,
       roomId: row.roomId,
       nickname: row.nickname,
       message: row.message,
       timestamp: row.timestamp,
-      isRead: row.isRead === 1,
+      isRead: row.isRead === true || row.isRead === 1,
     }));
   } catch (error) {
     console.error("Error getting chat messages:", error);
@@ -376,19 +338,16 @@ export async function addChatMessage(
   message: ChatMessage
 ): Promise<ChatMessage> {
   try {
-    const stmt = db.prepare(`
-      INSERT INTO messages (id, roomId, nickname, message, timestamp, isRead)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
+    const { error } = await supabase.from("messages").insert({
+      id: message.id,
+      roomId: message.roomId,
+      nickname: message.nickname,
+      message: message.message,
+      timestamp: message.timestamp,
+      isRead: message.isRead,
+    });
 
-    stmt.run(
-      message.id,
-      message.roomId,
-      message.nickname,
-      message.message,
-      message.timestamp,
-      message.isRead ? 1 : 0
-    );
+    if (error) throw error;
 
     return message;
   } catch (error) {
@@ -404,12 +363,13 @@ export async function markMessagesAsRead(
 ): Promise<void> {
   try {
     // 해당 룸의 메시지 중 사용자가 보낸 메시지가 아닌 것들을 읽음 처리
-    const stmt = db.prepare(`
-      UPDATE messages 
-      SET isRead = 1 
-      WHERE roomId = ? AND nickname != ?
-    `);
-    stmt.run(roomId, userNickname);
+    const { error } = await supabase
+      .from("messages")
+      .update({ isRead: true })
+      .eq("roomId", roomId)
+      .neq("nickname", userNickname);
+
+    if (error) throw error;
   } catch (error) {
     console.error("Error marking messages as read:", error);
   }
@@ -421,13 +381,18 @@ export async function getUnreadMessageCount(
   userId: string
 ): Promise<number> {
   try {
-    const stmt = db.prepare(`
-      SELECT COUNT(*) as count 
-      FROM messages 
-      WHERE roomId = ? AND nickname != ? AND isRead = 0
-    `);
-    const result = stmt.get(roomId, userId) as any;
-    return result?.count || 0;
+    const user = await getUser(userId);
+    if (!user) return 0;
+
+    const { count, error } = await supabase
+      .from("messages")
+      .select("*", { count: "exact", head: true })
+      .eq("roomId", roomId)
+      .neq("nickname", user.nickname)
+      .eq("isRead", false);
+
+    if (error) return 0;
+    return count || 0;
   } catch (error) {
     console.error("Error getting unread message count:", error);
     return 0;
@@ -435,37 +400,30 @@ export async function getUnreadMessageCount(
 }
 
 export async function getUserById(userId: string): Promise<User | null> {
-  try {
-    const stmt = db.prepare("SELECT * FROM users WHERE id = ?");
-    const result = stmt.get(userId) as any;
-    return result || null;
-  } catch (error) {
-    console.error("Error getting user by id:", error);
-    return null;
-  }
+  return await getUser(userId);
 }
 
 // 모든 룸의 읽지 않은 메시지 수 조회
 export async function getUnreadMessageCountsByRooms(
   userId: string
 ): Promise<Record<string, number>> {
-  const user = await getUserById(userId);
+  const user = await getUser(userId);
   if (!user) {
     return {};
   }
 
   try {
-    const stmt = db.prepare(`
-      SELECT roomId, COUNT(*) as count 
-      FROM messages 
-      WHERE nickname != ? AND isRead = 0
-      GROUP BY roomId
-    `);
-    const rows = stmt.all(user.nickname) as any[];
+    const { data, error } = await supabase
+      .from("messages")
+      .select("roomId")
+      .neq("nickname", user.nickname)
+      .eq("isRead", false);
+
+    if (error || !data) return {};
 
     const counts: Record<string, number> = {};
-    rows.forEach((row) => {
-      counts[row.roomId] = row.count;
+    data.forEach((row: any) => {
+      counts[row.roomId] = (counts[row.roomId] || 0) + 1;
     });
 
     return counts;
@@ -474,6 +432,3 @@ export async function getUnreadMessageCountsByRooms(
     return {};
   }
 }
-
-// 데이터베이스 인스턴스 export (필요한 경우)
-export { db };
