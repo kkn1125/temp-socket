@@ -1,8 +1,9 @@
-'use client';
+"use client";
 
-import { useEffect, useRef } from 'react';
-import { ChatMessage } from '@/types';
-import { Card } from '@/components/ui/card';
+import { useEffect, useRef } from "react";
+import { ChatMessage } from "@/types";
+import { Card } from "@/components/ui/card";
+import { useUser } from "@/contexts/UserContext";
 
 interface MessageListProps {
   messages: ChatMessage[];
@@ -10,9 +11,10 @@ interface MessageListProps {
 
 export function MessageList({ messages }: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { user } = useUser();
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   if (messages.length === 0) {
@@ -26,25 +28,25 @@ export function MessageList({ messages }: MessageListProps) {
   return (
     <div className="flex-1 overflow-y-auto space-y-2 p-4">
       {messages.map((message) => {
-        const isOwnMessage = false; // userId 기반으로 변경 필요 시 추가
-        
+        const isOwnMessage = user?.nickname === message.nickname;
+
         return (
           <div
             key={message.id}
-            className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}
+            className={`flex ${isOwnMessage ? "justify-end" : "justify-start"}`}
           >
             <Card
               className={`max-w-[70%] p-3 ${
-                isOwnMessage
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted'
+                isOwnMessage ? "bg-primary text-primary-foreground" : "bg-muted"
               }`}
             >
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
                   <span
                     className={`text-sm font-semibold ${
-                      isOwnMessage ? 'text-primary-foreground' : 'text-foreground'
+                      isOwnMessage
+                        ? "text-primary-foreground"
+                        : "text-foreground"
                     }`}
                   >
                     {message.nickname}
@@ -52,19 +54,19 @@ export function MessageList({ messages }: MessageListProps) {
                   <span
                     className={`text-xs ${
                       isOwnMessage
-                        ? 'text-primary-foreground/70'
-                        : 'text-muted-foreground'
+                        ? "text-primary-foreground/70"
+                        : "text-muted-foreground"
                     }`}
                   >
-                    {new Date(message.timestamp).toLocaleTimeString('ko-KR', {
-                      hour: '2-digit',
-                      minute: '2-digit',
+                    {new Date(message.timestamp).toLocaleTimeString("ko-KR", {
+                      hour: "2-digit",
+                      minute: "2-digit",
                     })}
                   </span>
                 </div>
                 <p
                   className={`text-sm whitespace-pre-wrap break-words ${
-                    isOwnMessage ? 'text-primary-foreground' : 'text-foreground'
+                    isOwnMessage ? "text-primary-foreground" : "text-foreground"
                   }`}
                 >
                   {message.message}
@@ -78,4 +80,3 @@ export function MessageList({ messages }: MessageListProps) {
     </div>
   );
 }
-

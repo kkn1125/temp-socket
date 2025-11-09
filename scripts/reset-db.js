@@ -2,7 +2,12 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
-const dbPath = path.join(process.cwd(), 'data', 'chat.db');
+const isVercel = process.env.VERCEL === "1";
+const basePath = isVercel 
+  ? "/tmp" 
+  : process.cwd();
+  
+const dbPath = path.join(basePath, 'data', 'chat.db');
 
 console.log('⚠️  WARNING: This will delete all data in the database!');
 console.log('📦 Resetting SQLite database...');

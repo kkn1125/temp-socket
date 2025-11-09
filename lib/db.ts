@@ -2,8 +2,8 @@ import Database from "better-sqlite3";
 import path from "path";
 import { Room, ChatMessage, User } from "@/types";
 import fs from "fs";
+import { dbPath } from "./config";
 
-const dbPath = path.join(process.cwd(), "data", "chat.db");
 const dataDir = path.dirname(dbPath);
 
 // data 디렉토리가 없으면 생성
