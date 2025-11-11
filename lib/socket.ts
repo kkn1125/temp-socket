@@ -26,23 +26,12 @@ export function connectSocket(): Promise<Socket> {
       return;
     }
 
-    // 프로덕션 환경에서 Socket.io 서버 URL 사용
-    // Vercel 배포 시 별도 서버(Railway, Render 등)에서 Socket.io 서버를 실행해야 함
+    // 가이드에 따라 같은 origin에 연결 (server.js에서 Next.js와 Socket.IO가 같은 HTTP 서버를 공유)
+    // 프로덕션 환경에서 별도 서버가 필요한 경우 NEXT_PUBLIC_SOCKET_URL 환경 변수 사용
     const socketUrl =
-      process.env.NEXT_PUBLIC_SOCKET_URL ||
-      (process.env.NODE_ENV === "production"
-        ? typeof window !== "undefined"
-          ? window.location.origin
-          : ""
-        : "http://localhost:3000");
-
-    if (!socketUrl) {
-      console.error(
-        "Socket.io URL is not configured. Please set NEXT_PUBLIC_SOCKET_URL environment variable."
-      );
-      reject(new Error("Socket.io URL is not configured"));
-      return;
-    }
+      process.env.NODE_ENV === "production"
+        ? process.env.NEXT_PUBLIC_SOCKET_URL || undefined
+        : "http://localhost:3000";
 
     socket = io(socketUrl, {
       transports: ["websocket", "polling"], // polling fallback 추가

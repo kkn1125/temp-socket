@@ -1,5 +1,4 @@
 const { createServer } = require("http");
-const { parse } = require("url");
 const next = require("next");
 const { Server } = require("socket.io");
 const {
@@ -16,20 +15,12 @@ const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.HOSTNAME || "localhost";
 const port = parseInt(process.env.PORT || "3000", 10);
 
+// when using middleware `hostname` and `port` must be provided below
 const app = next({ dev, hostname, port });
-const handle = app.getRequestHandler();
+const handler = app.getRequestHandler();
 
 app.prepare().then(() => {
-  const httpServer = createServer(async (req, res) => {
-    try {
-      const parsedUrl = parse(req.url, true);
-      await handle(req, res, parsedUrl);
-    } catch (err) {
-      console.error("Error occurred handling", req.url, err);
-      res.statusCode = 500;
-      res.end("internal server error");
-    }
-  });
+  const httpServer = createServer(handler);
 
   // Socket.io 서버 설정
   const io = new Server(httpServer, {
@@ -38,7 +29,7 @@ app.prepare().then(() => {
       methods: ["GET", "POST"],
       credentials: true,
     },
-    transports: ["websocket", "polling"], // polling fallback 추가
+    transports: ["websocket", "polling"],
     allowEIO3: true,
   });
 
