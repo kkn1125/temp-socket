@@ -34,6 +34,7 @@ export function connectSocket(): Promise<Socket> {
         : "http://localhost:3000";
 
     socket = io(socketUrl, {
+      secure: process.env.NODE_ENV === "production",
       transports: ["websocket", "polling"], // polling fallback 추가
       reconnection: true,
       reconnectionDelay: 1000,
