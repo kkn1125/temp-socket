@@ -1,24 +1,16 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { MessageList } from './MessageList';
 import { MessageInput } from './MessageInput';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ArrowLeft, Users, Lock } from 'lucide-react';
-import {
-  connectSocket,
-  joinRoom,
-  leaveRoom,
-  sendMessage,
-  onMessage,
-  offMessage,
-  onRoomUpdate,
-  offRoomUpdate,
-} from '@/lib/socket';
+import { useRealtimeChat, RealtimeChatMessage } from '@/hooks/use-realtime-chat';
 import { ChatMessage, Room } from '@/types';
 import { getUserId, getRoomSession, setRoomSession } from '@/lib/cookies';
+import { useUser } from '@/contexts/UserContext';
 
 interface ChatRoomProps {
   room: Room;
@@ -27,103 +19,112 @@ interface ChatRoomProps {
 
 export function ChatRoom({ room, initialMessages }: ChatRoomProps) {
   const router = useRouter();
-  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
-  const [userId, setUserId] = useState<string | null>(null);
+  const { user } = useUser();
   const [participantCount, setParticipantCount] = useState(room.participantCount);
-  const [connected, setConnected] = useState(false);
+  const userId = getUserId();
 
-  // initialMessages가 변경될 때 메시지 업데이트 (새로고침 시)
-  useEffect(() => {
-    setMessages(initialMessages);
+  // 초기 메시지를 RealtimeChatMessage 형식으로 변환
+  const initialRealtimeMessages = useMemo<RealtimeChatMessage[]>(() => {
+    return initialMessages.map((msg) => ({
+      id: msg.id,
+      content: msg.message,
+      user: {
+        name: msg.nickname,
+      },
+      createdAt: new Date(msg.timestamp).toISOString(),
+    }));
   }, [initialMessages]);
 
-  // 컴포넌트 마운트 시 메시지 다시 가져오기 (새로고침 대응)
-  useEffect(() => {
-    const fetchMessages = async () => {
-      try {
-        const response = await fetch(`/api/rooms/${room.id}/messages`);
-        if (response.ok) {
-          const fetchedMessages = await response.json();
-          setMessages(fetchedMessages);
-        }
-      } catch (error) {
-        console.error('Failed to fetch messages:', error);
-      }
-    };
+  // 메시지 저장 핸들러
+  const handleMessage = async (messages: RealtimeChatMessage[]) => {
+    if (messages.length === 0) return;
 
-    fetchMessages();
-  }, [room.id]);
-
-  useEffect(() => {
-    const currentUserId = getUserId();
+    const latestMessage = messages[messages.length - 1];
     
-    if (!currentUserId) {
-      // userId가 없으면 홈으로 리다이렉트 (계정 생성 모달이 표시됨)
+    // Supabase에 메시지 저장
+    try {
+      const chatMessage: ChatMessage = {
+        id: latestMessage.id,
+        roomId: room.id,
+        nickname: latestMessage.user.name,
+        message: latestMessage.content,
+        timestamp: new Date(latestMessage.createdAt).getTime(),
+        isRead: false,
+      };
+
+      await fetch(`/api/rooms/${room.id}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(chatMessage),
+      });
+    } catch (error) {
+      console.error('Failed to save message:', error);
+    }
+  };
+
+  // Realtime Chat hook 사용
+  const { messages: realtimeMessages, sendMessage, isConnected } = useRealtimeChat({
+    roomName: room.id,
+    username: user?.nickname || '익명',
+    onMessage: handleMessage,
+    initialMessages: initialRealtimeMessages,
+  });
+
+  // RealtimeChatMessage를 ChatMessage로 변환
+  const messages = useMemo<ChatMessage[]>(() => {
+    return realtimeMessages.map((msg) => ({
+      id: msg.id,
+      roomId: room.id,
+      nickname: msg.user.name,
+      message: msg.content,
+      timestamp: new Date(msg.createdAt).getTime(),
+      isRead: false,
+    }));
+  }, [realtimeMessages, room.id]);
+
+  useEffect(() => {
+    if (!userId) {
       router.push('/');
       return;
     }
 
-    setUserId(currentUserId);
     const session = getRoomSession();
+    
+    // 세션 저장 (룸 나가도 세션은 유지)
+    if (!session || session.roomId !== room.id) {
+      setRoomSession(room.id, '');
+    }
+  }, [room.id, userId, router]);
 
-    // 소켓 연결 및 룸 참여
-    const initializeSocket = async () => {
+  // 참여자 수 업데이트 (주기적으로 또는 필요시)
+  useEffect(() => {
+    const fetchParticipantCount = async () => {
       try {
-        await connectSocket();
-        setConnected(true);
-        
-        // 세션 확인 - 이미 참여한 상태인지 확인
-        const isReconnect = session?.roomId === room.id;
-        
-        // 룸 참여 (재연결 여부 전달)
-        await joinRoom(room.id, currentUserId, isReconnect);
-
-        // 세션 저장 (룸 나가도 세션은 유지)
-        if (!session || session.roomId !== room.id) {
-          setRoomSession(room.id, '');
+        const response = await fetch(`/api/rooms/${room.id}`);
+        if (response.ok) {
+          const data = await response.json();
+          setParticipantCount(data.room.participantCount || 0);
         }
       } catch (error) {
-        console.error('Failed to connect socket:', error);
+        console.error('Failed to fetch participant count:', error);
       }
     };
 
-    initializeSocket();
+    fetchParticipantCount();
+    const interval = setInterval(fetchParticipantCount, 10000); // 10초마다 업데이트
 
-    // 메시지 수신 핸들러
-    const handleMessage = (message: ChatMessage) => {
-      if (message.roomId === room.id) {
-        setMessages((prev) => [...prev, message]);
-      }
-    };
-
-    // 룸 업데이트 핸들러
-    const handleRoomUpdate = (data: { roomId: string; participantCount: number }) => {
-      if (data.roomId === room.id) {
-        setParticipantCount(data.participantCount);
-      }
-    };
-
-    onMessage(handleMessage);
-    onRoomUpdate(handleRoomUpdate);
-
-    // 정리
-    return () => {
-      offMessage(handleMessage);
-      offRoomUpdate(handleRoomUpdate);
-      // leaveRoom은 명시적으로 나가기 버튼을 클릭할 때만 호출
-      // cleanup에서는 소켓 연결을 유지 (세션이 남아있어야 하므로)
-    };
+    return () => clearInterval(interval);
   }, [room.id]);
 
   const handleSendMessage = async (message: string) => {
-    if (userId && message.trim()) {
-      await sendMessage(room.id, userId, message);
+    if (message.trim()) {
+      await sendMessage(message);
     }
   };
 
-  const handleLeave = async () => {
-    await leaveRoom(room.id);
-    // 세션은 유지 (쿠키에 저장되어 있음)
+  const handleLeave = () => {
     router.push('/rooms');
   };
 
@@ -148,7 +149,7 @@ export function ChatRoom({ room, initialMessages }: ChatRoomProps) {
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Users className="h-4 w-4" />
                   <span>참여자: {participantCount}명</span>
-                  {connected && (
+                  {isConnected && (
                     <span className="text-green-500">● 연결됨</span>
                   )}
                 </div>
@@ -163,7 +164,7 @@ export function ChatRoom({ room, initialMessages }: ChatRoomProps) {
         </div>
 
         {/* 메시지 입력 */}
-        <MessageInput onSend={handleSendMessage} disabled={!connected || !userId} />
+        <MessageInput onSend={handleSendMessage} disabled={!isConnected || !userId} />
       </div>
     </>
   );
